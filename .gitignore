@@ -16,7 +16,7 @@ android/.gradle/
 android/app/debug/
 android/app/profile/
 android/app/release/
-android/app/google-services.json
+# android/app/google-services.json 已纳入版本控制（占位模板，用户替换为真实 Firebase 配置即可）
 android/app/src/main/res/values/google_maps_api.xml
 android/local.properties
 android/**/gradle-wrapper.jar

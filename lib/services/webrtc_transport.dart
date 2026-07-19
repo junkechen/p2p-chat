@@ -39,7 +39,7 @@ class WebRtcTransport {
   });
 
   bool get isConnected =>
-      _dc != null && _dc!.state == RTCDataChannelState.Open;
+      _dc != null && _dc!.state == RTCDataChannelState.RTCDataChannelOpen;
 
   Future<void> connect() async {
     try {
@@ -52,7 +52,6 @@ class WebRtcTransport {
 
       // 本地 ICE 候选产生 -> 经信令转发给对方
       _pc!.onIceCandidate = (c) {
-        if (c == null) return;
         signaling.sendCandidate(roomId, {
           ...c.toMap(),
           'by': role,
@@ -77,11 +76,13 @@ class WebRtcTransport {
           role: role,
           onAnswer: (ans) async {
             await _pc!.setRemoteDescription(
-              RTCSessionDescription.fromMap(ans),
+              RTCSessionDescription(ans['sdp'], ans['type']),
             );
           },
           onCandidate: (c) async {
-            await _pc!.addCandidate(RTCIceCandidate.fromMap(c));
+            await _pc!.addCandidate(
+              RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']),
+            );
           },
         );
       } else {
@@ -92,14 +93,16 @@ class WebRtcTransport {
           role: role,
           onOffer: (off) async {
             await _pc!.setRemoteDescription(
-              RTCSessionDescription.fromMap(off),
+              RTCSessionDescription(off['sdp'], off['type']),
             );
             final answer = await _pc!.createAnswer();
             await _pc!.setLocalDescription(answer);
             await signaling.sendAnswer(roomId, answer.toMap());
           },
           onCandidate: (c) async {
-            await _pc!.addCandidate(RTCIceCandidate.fromMap(c));
+            await _pc!.addCandidate(
+              RTCIceCandidate(c['candidate'], c['sdpMid'], c['sdpMLineIndex']),
+            );
           },
         );
       }
@@ -113,7 +116,7 @@ class WebRtcTransport {
     _dc!.onMessage = (msg) {
       if (msg.type != MessageType.text) return;
       try {
-        final json = jsonDecode(msg.text ?? '') as Map<String, dynamic>;
+        final json = jsonDecode(msg.text) as Map<String, dynamic>;
         final m = ChatMessage.fromJson(json, isMe: false)
             .copyWith(peerId: roomId);
         onMessage?.call(m);
@@ -122,7 +125,7 @@ class WebRtcTransport {
       }
     };
     _dc!.onDataChannelState = (s) {
-      if (s == RTCDataChannelState.Open) {
+      if (s == RTCDataChannelState.RTCDataChannelOpen) {
         peer = PeerDevice(
           id: roomId,
           name: '房间 $roomId',
@@ -143,7 +146,7 @@ class WebRtcTransport {
       isMe: true,
       peerId: roomId,
     );
-    _dc!.send(RTCDataChannelMessage.text(msg.toRaw()));
+    _dc!.send(RTCDataChannelMessage(msg.toRaw()));
     onMessage?.call(msg); // 本地回显
     return true;
   }

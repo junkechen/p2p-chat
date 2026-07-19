@@ -6,7 +6,7 @@ class PeerDevice {
   final String id; // 唯一标识：局域网 = IP，跨网 = 房间号
   final String ip;
   String name;
-  final int port;
+  int port;
   final ChatMode mode;
   DateTime lastSeen;
 

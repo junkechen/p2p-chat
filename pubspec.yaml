@@ -10,10 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
   # 跨网模式：WebRTC 数据通道
-  flutter_webrtc: ^0.11.0
+  flutter_webrtc: ^1.5.2
   # 跨网模式：Firebase 实时数据库作为信令通道（仅交换连接握手）
-  firebase_core: ^3.6.0
-  firebase_database: ^11.1.0
+  firebase_core: ^4.12.1
+  firebase_database: ^12.4.6
 
 dev_dependencies:
   flutter_test:

@@ -7,6 +7,7 @@ class ChatMessage {
   final String text;
   final int timestamp;
   final bool isMe;
+  final String peerId; // 用于匹配当前会话对端（局域网=对方IP，跨网=房间号）
 
   ChatMessage({
     required this.fromName,
@@ -14,6 +15,7 @@ class ChatMessage {
     required this.text,
     required this.timestamp,
     this.isMe = false,
+    this.peerId = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -21,6 +23,7 @@ class ChatMessage {
         'fromIp': fromIp,
         'text': text,
         'timestamp': timestamp,
+        'peerId': peerId,
       };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json, {bool isMe = false}) =>
@@ -30,6 +33,7 @@ class ChatMessage {
         text: json['text'] as String? ?? '',
         timestamp: json['timestamp'] as int? ?? 0,
         isMe: isMe,
+        peerId: json['peerId'] as String? ?? '',
       );
 
   /// 序列化为 TCP 传输用的原始 JSON 字符串
@@ -41,6 +45,7 @@ class ChatMessage {
     String? text,
     int? timestamp,
     bool? isMe,
+    String? peerId,
   }) =>
       ChatMessage(
         fromName: fromName ?? this.fromName,
@@ -48,5 +53,6 @@ class ChatMessage {
         text: text ?? this.text,
         timestamp: timestamp ?? this.timestamp,
         isMe: isMe ?? this.isMe,
+        peerId: peerId ?? this.peerId,
       );
 }

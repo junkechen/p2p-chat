@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:p2p_chat/models/device.dart';
 import 'package:p2p_chat/screens/discovery_screen.dart';
 import 'package:p2p_chat/services/p2p_service.dart';
 
-/// 第一步：输入昵称并启动 P2P 服务
+/// 第一步：输入昵称并选择连接模式，启动 P2P 服务
 class SetupScreen extends StatefulWidget {
   const SetupScreen({super.key});
 
@@ -12,6 +13,7 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> {
   final _ctrl = TextEditingController();
+  ChatMode _mode = ChatMode.lan;
   bool _starting = false;
 
   @override
@@ -29,10 +31,22 @@ class _SetupScreenState extends State<SetupScreen> {
       return;
     }
     setState(() => _starting = true);
-    await P2PService().start(name);
+    try {
+      await P2PService().start(name, mode: _mode);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('启动失败：$e')),
+        );
+        setState(() => _starting = false);
+      }
+      return;
+    }
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => DiscoveryScreen(myName: name)),
+        MaterialPageRoute(
+          builder: (_) => DiscoveryScreen(myName: name, mode: _mode),
+        ),
       );
     }
   }
@@ -52,7 +66,7 @@ class _SetupScreenState extends State<SetupScreen> {
               const Text('P2P 聊天',
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              const Text('点对点直连 · 无需服务器',
+              const Text('点对点直连 · 不依赖中心服务器',
                   style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 40),
               TextField(
@@ -66,6 +80,37 @@ class _SetupScreenState extends State<SetupScreen> {
                 onSubmitted: (_) => _start(),
               ),
               const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('连接模式',
+                    style: TextStyle(fontSize: 14, color: Colors.grey)),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<ChatMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: ChatMode.lan,
+                    label: Text('局域网'),
+                    icon: Icon(Icons.wifi),
+                  ),
+                  ButtonSegment(
+                    value: ChatMode.wan,
+                    label: Text('跨网'),
+                    icon: Icon(Icons.public),
+                  ),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (s) => setState(() => _mode = s.first),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _mode == ChatMode.lan
+                    ? '同一 WiFi 下自动发现，纯直连，完全不经任何服务器'
+                    : '不同 WiFi / 不同网络也能聊；握手走 Firebase，消息端到端直连加密',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
                 height: 48,

@@ -27,12 +27,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _onMessage(ChatMessage msg) {
-    // 只展示与当前对端的对话（按 IP 匹配）
-    if (msg.isMe) {
-      if (msg.fromIp != widget.peer.ip) return;
-    } else {
-      if (msg.fromIp != widget.peer.ip) return;
-    }
+    // 只展示与当前对端的对话：优先用 peerId，回退到 fromIp
+    final key = msg.peerId.isNotEmpty ? msg.peerId : msg.fromIp;
+    if (key != widget.peer.id) return;
     setState(() => _messages.add(msg));
     _scrollToBottom();
   }
@@ -53,7 +50,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _ctrl.text.trim();
     if (text.isEmpty) return;
     _ctrl.clear();
-    final ok = await _svc.sendMessage(widget.peer.ip, text);
+    final ok = await _svc.sendMessage(widget.peer.id, text);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('发送失败，对方可能不在线或不通')),
@@ -70,15 +67,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isWan = widget.peer.mode == ChatMode.wan;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.peer.name),
+        title: Text(isWan ? '房间 ${widget.peer.id}' : widget.peer.name),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Center(
-              child: Text(widget.peer.ip,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              child: Text(
+                isWan ? '跨网·加密直连' : widget.peer.ip,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             ),
           ),
         ],

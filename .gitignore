@@ -5,6 +5,8 @@
 .pub-cache/
 .pub/
 /build/
+# 由 CI 重新解析生成（本机网络受限时不提交，避免残缺 lock 影响构建）
+pubspec.lock
 *.iml
 *.apk
 *.aab
@@ -14,6 +16,8 @@ android/.gradle/
 android/app/debug/
 android/app/profile/
 android/app/release/
+android/app/google-services.json
+android/app/src/main/res/values/google_maps_api.xml
 android/local.properties
 android/**/gradle-wrapper.jar
 **/*.keystore

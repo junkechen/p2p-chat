@@ -4,12 +4,14 @@ import 'dart:io';
 
 import 'package:p2p_chat/models/device.dart';
 import 'package:p2p_chat/models/message.dart';
+import 'package:p2p_chat/services/signaling_service.dart';
+import 'package:p2p_chat/services/webrtc_transport.dart';
 
 /// P2P 通信核心服务（单例）
 ///
-/// 发现：UDP 广播（端口 [udpPort]），每 2 秒播一次，接收端据此维护在线列表
-/// 传输：TCP（端口 [tcpPort]）短连接，发消息时主动连对方 -> 发送 -> 关闭
-/// 接收：本地起 ServerSocket 监听，每条连接读取一整条消息后关闭
+/// 两种模式：
+/// - [ChatMode.lan] 局域网：UDP 广播发现（端口 5005）+ TCP 直连收发（端口 5006），纯 P2P。
+/// - [ChatMode.wan] 跨网：   WebRTC 数据通道 + Firebase 信令（仅握手不碰消息），可跨不同 WiFi/网络。
 class P2PService {
   static const int udpPort = 5005;
   static const int tcpPort = 5006;
@@ -19,12 +21,19 @@ class P2PService {
   P2PService._internal();
 
   String myName = '匿名';
+  ChatMode _mode = ChatMode.lan;
+  ChatMode get mode => _mode;
 
+  // ---- 局域网相关 ----
   final Map<String, PeerDevice> _peers = {};
   RawDatagramSocket? _udp;
   ServerSocket? _tcpServer;
   Timer? _broadcastTimer;
   Timer? _sweepTimer;
+
+  // ---- 跨网相关 ----
+  final SignalingService _signaling = SignalingService();
+  final Map<String, WebRtcTransport> _wan = {};
 
   final _peerController = StreamController<PeerDevice>.broadcast();
   final _messageController = StreamController<ChatMessage>.broadcast();
@@ -35,8 +44,14 @@ class P2PService {
   /// 收到新消息事件
   Stream<ChatMessage> get messageStream => _messageController.stream;
 
-  /// 当前存活的对端列表（按昵称排序）
+  /// 当前存活的对端列表
   List<PeerDevice> get peers {
+    if (_mode == ChatMode.wan) {
+      return _wan.values
+          .where((t) => t.isConnected && t.peer != null)
+          .map((t) => t.peer!)
+          .toList();
+    }
     final alive = _peers.values.where((p) => p.isAlive).toList();
     alive.sort((a, b) => a.name.compareTo(b.name));
     return alive;
@@ -52,7 +67,6 @@ class P2PService {
       for (final iface in interfaces) {
         for (final addr in iface.addresses) {
           final ip = addr.address;
-          // 跳过常见的虚拟/蜂窝网段，优先返回 WiFi 段
           if (ip.startsWith('192.168.') ||
               ip.startsWith('10.') ||
               ip.startsWith('172.')) {
@@ -60,20 +74,27 @@ class P2PService {
           }
         }
       }
-      // 没匹配到常见段就返回第一个
       for (final iface in interfaces) {
         if (iface.addresses.isNotEmpty) return iface.addresses.first.address;
       }
-    } catch (_) {
-      // 忽略，返回 null
-    }
+    } catch (_) {}
     return null;
   }
 
-  /// 启动服务（输入昵称）
-  Future<void> start(String name) async {
+  /// 启动服务（输入昵称 + 模式）
+  Future<void> start(String name, {ChatMode mode = ChatMode.lan}) async {
     myName = name.trim().isEmpty ? '匿名' : name.trim();
+    _mode = mode;
+    if (mode == ChatMode.lan) {
+      await _startLan();
+    } else {
+      await _startWan();
+    }
+  }
 
+  // ============ 局域网 ============
+
+  Future<void> _startLan() async {
     _udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, udpPort);
     _udp!.broadcastEnabled = true;
     _udp!.listen(_onUdpEvent);
@@ -109,13 +130,10 @@ class P2PService {
       final data = jsonDecode(utf8.decode(dg.data)) as Map<String, dynamic>;
       if (data['type'] != 'announce') return;
       final ip = dg.address.address;
-      // 忽略自己发给自己（同一台机器多网卡情况）
       final name = data['name'] as String? ?? '未知';
       final port = (data['port'] as int?) ?? tcpPort;
       _upsertPeer(ip, name, port);
-    } catch (_) {
-      // 忽略非法包
-    }
+    } catch (_) {}
   }
 
   void _upsertPeer(String ip, String name, int port) {
@@ -125,7 +143,7 @@ class P2PService {
       existing.port = port;
       existing.touch();
     } else {
-      _peers[ip] = PeerDevice(ip: ip, name: name, port: port);
+      _peers[ip] = PeerDevice(id: ip, name: name, ip: ip, port: port);
     }
     _peerController.add(_peers[ip]!);
   }
@@ -140,7 +158,6 @@ class P2PService {
       _peers.remove(k);
     }
     _broadcast();
-    // 通知 UI 列表可能变化（即便没有新 peer 事件）
     for (final p in _peers.values) {
       _peerController.add(p);
     }
@@ -154,20 +171,14 @@ class P2PService {
       }
       final json = jsonDecode(utf8.decode(chunks)) as Map<String, dynamic>;
       final msg = ChatMessage.fromJson(json, isMe: false);
-      _messageController.add(msg);
-    } catch (_) {
-      // 忽略损坏的连接
-    } finally {
-      try {
-        await socket.close();
-      } catch (_) {}
-    }
+      _messageController.add(msg.copyWith(peerId: msg.fromIp));
+    } catch (_) {}
+    try {
+      await socket.close();
+    } catch (_) {}
   }
 
-  /// 向指定 IP 发送一条消息，返回是否成功
-  Future<bool> sendMessage(String peerIp, String text) async {
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) return false;
+  Future<bool> _sendLan(String peerIp, String text) async {
     try {
       final peer = _peers[peerIp];
       final port = peer?.port ?? tcpPort;
@@ -179,19 +190,89 @@ class P2PService {
       final msg = ChatMessage(
         fromName: myName,
         fromIp: await localIp ?? '0.0.0.0',
-        text: trimmed,
+        text: text,
         timestamp: DateTime.now().millisecondsSinceEpoch,
         isMe: true,
+        peerId: peerIp,
       );
       socket.add(utf8.encode(msg.toRaw()));
       await socket.flush();
       await socket.close();
-      // 本地回显（自己发出的气泡）
       _messageController.add(msg.copyWith(fromIp: peerIp));
       return true;
     } catch (_) {
       return false;
     }
+  }
+
+  // ============ 跨网（WebRTC + Firebase 信令） ============
+
+  Future<void> _startWan() async {
+    try {
+      await _signaling.init();
+    } catch (e) {
+      throw Exception(
+          'Firebase 初始化失败，请确认 lib/firebase_options.dart 已填入真实配置：$e');
+    }
+  }
+
+  /// 创建房间，返回 6 位房间号（发给对方输入即可加入）
+  Future<String> createRoom() async {
+    if (_mode != ChatMode.wan) throw Exception('当前不是跨网模式');
+    final id = _signaling.generateRoomId();
+    final t = WebRtcTransport(
+      roomId: id,
+      isOfferer: true,
+      myName: myName,
+      role: 'caller',
+      signaling: _signaling,
+    );
+    _attachWan(id, t);
+    await t.connect();
+    return id;
+  }
+
+  /// 加入指定房间号，返回是否成功
+  Future<bool> joinRoom(String roomIdRaw) async {
+    if (_mode != ChatMode.wan) return false;
+    final id = roomIdRaw.trim();
+    if (id.isEmpty || _wan.containsKey(id)) return false;
+    final t = WebRtcTransport(
+      roomId: id,
+      isOfferer: false,
+      myName: myName,
+      role: 'callee',
+      signaling: _signaling,
+    );
+    _attachWan(id, t);
+    try {
+      await t.connect();
+      return true;
+    } catch (e) {
+      _wan.remove(id);
+      return false;
+    }
+  }
+
+  void _attachWan(String id, WebRtcTransport t) {
+    t.onMessage = (m) => _messageController.add(m);
+    t.onConnected = (p) => _peerController.add(p);
+    t.onError = (e) => print('[WAN] $e');
+    _wan[id] = t;
+  }
+
+  // ============ 统一收发 ============
+
+  /// 发送消息。局域网 [targetId] 为对方 IP；跨网为房间号
+  Future<bool> sendMessage(String targetId, String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return Future.value(false);
+    if (_mode == ChatMode.wan) {
+      final t = _wan[targetId];
+      if (t == null) return Future.value(false);
+      return t.send(trimmed);
+    }
+    return _sendLan(targetId, trimmed);
   }
 
   /// 停止服务
@@ -208,5 +289,9 @@ class P2PService {
     } catch (_) {}
     _udp = null;
     _tcpServer = null;
+    for (final t in _wan.values) {
+      t.close();
+    }
+    _wan.clear();
   }
 }

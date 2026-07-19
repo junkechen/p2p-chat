@@ -1,7 +1,7 @@
 name: p2p_chat
-description: 点对点聊天，无需服务器，基于 Flutter + Dart 原生 socket 实现。
+description: 点对点聊天，局域网直连 + 跨网 WebRTC，信令走 Firebase（仅握手不碰消息）。
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.2.0 <4.0.0'
@@ -9,6 +9,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # 跨网模式：WebRTC 数据通道
+  flutter_webrtc: ^0.11.0
+  # 跨网模式：Firebase 实时数据库作为信令通道（仅交换连接握手）
+  firebase_core: ^3.6.0
+  firebase_database: ^11.1.0
 
 dev_dependencies:
   flutter_test:
